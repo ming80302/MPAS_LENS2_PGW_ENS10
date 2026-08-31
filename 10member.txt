@@ -1,0 +1,42 @@
+
+● The 10 members and their justification are already documented — I found the
+  definitive rationale.
+
+  The 10 members
+
+  1011.001  1031.002  1051.003  1071.004  1091.005
+  1111.006  1131.007  1151.008  1171.009  1191.010
+
+  (ens_id.var_id pairs, in CESM2-LE "smbb" macro-initial-condition naming)
+
+
+  Per /glade/u/home/mingge/LENS2/MPAS_PGW/config.py and its README (which
+  MPAS_LENS2_PGW_ENS10 inherits this list from verbatim):
+
+  - It's not a curated/arbitrary subset — it's the full set available at the 
+  required output frequency. These are every LENS2 "smbb" member that has
+  6-hourly (hour_6) output archived at /glade/campaign/cgd/cesm/CESM2-LE, which
+  is what MPAS needs for T/Q/U/V/PS. Confirmed by directly listing
+  atm/proc/tseries/hour_6/T/ on the archive, not assumed.
+  - This pipeline (MPAS_LENS2_PGW_ENS10) only needs monthly-frequency fields
+  (T/Q/Z3/PS/TS + daily SST), so the hour_6 constraint doesn't strictly bind
+  here — but the same 10-member list was reused for consistency with the sibling
+  LENS2/MPAS_PGW pipeline, and independently re-verified for this pipeline's
+  own variable/frequency needs via lib.catalog.available_members() (README: "all
+  10 have monthly T/Q/Z3/PS/TS and daily SST archived for both periods").
+  - It matches a pre-existing hardcoded list in the older run_get_cesm2_data.csh
+  script (July 2022), which the newer pipelines confirmed against the live
+  archive rather than blindly copying — i.e., the old ad hoc choice happened to
+  already equal the archive-availability-driven answer.
+  - Full LENS2 has 100 members total, but only 10 have the smbb macro run at 
+  6-hourly output — the constraint is archival, not a scientific downsampling
+  choice (e.g., not "10 members chosen to span internal variability" — it's "10
+  is all there is at this frequency").
+
+  justification: data availability, not statistical design — 
+  these are the only 10 CESM2-LE smbb members with sufficiently
+  high-frequency output archived, and that set has been independently
+  re-verified against the live archive for each pipeline's specific variable
+  needs.
+
+ 

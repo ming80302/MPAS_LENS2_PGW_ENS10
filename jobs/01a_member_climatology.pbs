@@ -1,0 +1,36 @@
+#!/bin/bash -l
+### Stage 01a: per-member LENS2 climatology (current + future), one PBS
+### array task per ensemble member -- same per-member cost as
+### MPAS_LENS2_PGW's single-member stage 01 (a few GB, monthly-only data),
+### just run 10x in parallel instead of once.
+
+#PBS -N lens2pgw_ens10_01a
+#PBS -A P66770001
+#PBS -l select=1:ncpus=1:mem=50GB
+#PBS -l walltime=2:00:00
+#PBS -q casper
+#PBS -j oe
+#PBS -r y
+#PBS -J 1-10
+
+source /glade/work/mingge/miniconda3/etc/profile.d/conda.sh
+conda activate casper_2023   # needs xarray, numpy, netCDF4
+
+cd /glade/u/home/mingge/MPAS/MPAS_LENS2_PGW_ENS10
+
+# PBS_ARRAY_INDEX (1-10) -> the corresponding (ens_mem, var_id) entry in
+# config.MEMBERS, read directly from config.py so there's a single source
+# of truth for the member list.
+MEMBER=$(python3 -c "
+import config
+i = ${PBS_ARRAY_INDEX} - 1
+ens_mem, var_id = config.MEMBERS[i]
+print(f'{ens_mem}.{var_id}')
+")
+
+echo "Array task ${PBS_ARRAY_INDEX}: member ${MEMBER}"
+
+python 01a_member_climatology.py --members "${MEMBER}" --period current \
+    >& "logs/01a_member_climatology_${MEMBER}_current.log"
+python 01a_member_climatology.py --members "${MEMBER}" --period future \
+    >& "logs/01a_member_climatology_${MEMBER}_future.log"

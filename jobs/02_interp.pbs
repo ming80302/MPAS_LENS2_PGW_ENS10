@@ -1,0 +1,26 @@
+#!/bin/bash -l
+### Stage 02: vertical interpolation to the 37 ERA5 pressure levels + RH.
+### Pure Python (lib/vinterp.py) -- no NCL needed.
+
+#PBS -N lens2pgw_ens10_02_interp
+#PBS -A P66770001
+#PBS -l select=1:ncpus=1:mem=50GB
+#PBS -l walltime=2:00:00
+#PBS -q casper
+#PBS -j oe
+#PBS -r y
+
+source /glade/work/mingge/miniconda3/etc/profile.d/conda.sh
+conda activate casper_2023
+
+cd /glade/u/home/mingge/MPAS/MPAS_LENS2_PGW_ENS10
+
+# ANNUAL=1 (set via run_pipeline.sh --annual / qsub -v ANNUAL=1) interpolates
+# the single annual-mean ensemble-mean climatology instead of the 12
+# per-month ones -- requires stage 01b to have been run with --annual first.
+# See README.
+ANNUAL_FLAG=""
+[ "${ANNUAL:-0}" = "1" ] && ANNUAL_FLAG="--annual"
+
+python 02_interp_pressure_rh.py --period current $ANNUAL_FLAG >& logs/02_interp_current${ANNUAL_FLAG:+_annual}.log
+python 02_interp_pressure_rh.py --period future  $ANNUAL_FLAG >& logs/02_interp_future${ANNUAL_FLAG:+_annual}.log

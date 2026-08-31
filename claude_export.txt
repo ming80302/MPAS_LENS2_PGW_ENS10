@@ -1,0 +1,617 @@
+╭─── Claude Code v2.1.205 ─────────────────────────────────────────────────────╮
+│                                       │ Tips for getting started             │
+│           Welcome back Ming!          │ Run /init to create a CLAUDE.md fil… │
+│                                       │ ──────────────────────────────────── │
+│                ▐▛███▜▌                │ What's new                           │
+│               ▝▜█████▛▘               │ Added an auto mode rule that blocks… │
+│                 ▘▘ ▝▝                 │ Fixed `--json-schema` silently prod… │
+│                                       │ Fixed a message sent while Claude w… │
+│   Sonnet 5 · Claude Team · MMM-AAII   │ /release-notes for more              │
+│      ~/MPAS/MPAS_LENS2_PGW_ENS10      │                                      │
+╰──────────────────────────────────────────────────────────────────────────────╯
+
+
+❯ continue                                                                      
+
+  Searched for 1 pattern, read 1 file, listed 2 directories, ran 6 shell commands (ctrl+o to expand)
+
+● I found what's going on: this is the LENS2→MPAS PGW ensemble pipeline
+  (MPAS_LENS2_PGW_ENS10), and it stalled overnight. Here's the state:
+
+  - Stage 01a (per-member climatology, 10-member array job) ran and produced all
+  1440 expected files, but 6 files are HDF-corrupted (unreadable), almost
+  certainly from a transient permission/lock race during the array run — several
+  logs show PermissionError on .nc.tmp files mid-run before a later retry
+  overwrote the logs:
+    - current/1031.002/SST_12.nc
+    - current/1151.008/SST_02.nc
+    - future/1051.003/Z3_01.nc
+    - future/1091.005/T_01.nc
+    - future/1111.006/Q_08.nc
+    - future/1171.009/Z3_01.nc
+  - Stage 01b (ensemble mean) then crashed trying to open two of those corrupted
+  files.
+  - Stages 02/03/04 haven't run yet. No pipeline jobs are currently
+  queued/running (qstat only shows an unrelated init_real job).
+
+  Plan to unstick it: delete those 6 corrupted files, rebuild just those (single
+  member/period/var/month each — cheap), then rerun 01b, then continue to
+  02→03→04.
+
+● User answered Claude's questions:
+  ⎿  · How should I fix the 6 corrupted 01a climatology files and get the 
+     pipeline moving again? → Rerun the 6 files now, interactively (Recommended)
+
+● I'll delete the 6 corrupted files and regenerate each with a targeted rerun.
+
+  Ran 2 shell commands (ctrl+o to expand)
+
+● I'll wait for the background rerun to finish before verifying and moving on to
+  stage 01b.
+
+● Task Output b5bdibw0n
+  ⎿  === current 1031.002 SST month 12 ===
+     wrote /glade/derecho/scratch/mingge/MPAS_LENS2_PGW_ENS10/01a_member_ra
+     w/current/1031.002/SST_12.nc (n_years=30)
+     … +14 lines (ctrl+o to expand)
+
+● Background command "cd /glade/u/home/mingge/MPAS/MPAS_LENS2_PGW_ENS10
+source /glade/work/mingge/miniconda3/etc/profile.d/conda.sh
+conda activate casper_2023
+
+echo "=== current 1031.002 SST month 12 ==="
+python 01a_member_climatology.py --period current --members 1031.002 --vars SST
+--months 12 --overwrite
+echo "=== current 1151.008 SST month 02 ==="
+python 01a_member_climatology.py --period current --members 1151.008 --vars SST
+--months 2 --overwrite
+echo "=== future 1051.003 Z3 month 01 ==="
+python 01a_member_climatology.py --period future --members 1051.003 --vars Z3
+--months 1 --overwrite
+echo "=== future 1091.005 T month 01 ==="
+python 01a_member_climatology.py --period future --members 1091.005 --vars T
+--months 1 --overwrite
+echo "=== future 1111.006 Q month 08 ==="
+python 01a_member_climatology.py --period future --members 1111.006 --vars Q
+--months 8 --overwrite
+echo "=== future 1171.009 Z3 month 01 ==="
+python 01a_member_climatology.py --period future --members 1171.009 --vars Z3
+--months 1 --overwrite" completed (exit code 0)
+
+● All 6 rebuilds succeeded. Let me verify each file now opens cleanly, then
+  rerun stage 01b.
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● All 6 files are fixed. Now let's rerun stage 01b (ensemble climatology).
+
+  Read 1 file, ran 1 shell command (ctrl+o to expand)
+
+● Task Output b0qx9m42n
+  ⎿  current exit: 0
+     future exit: 0
+     wrote /glade/derecho/scratch/mingge/MPAS_LENS2_PGW_ENS10/01b_ensemble_
+     … +15 lines (ctrl+o to expand)
+
+● Background command "cd /glade/u/home/mingge/MPAS/MPAS_LENS2_PGW_ENS10
+source /glade/work/mingge/miniconda3/etc/profile.d/conda.sh
+conda activate casper_2023
+python 01b_ensemble_climatology.py --period current &gt;&amp;
+logs/01b_ensemble_climatology_current.log
+echo "current exit: $?"
+python 01b_ensemble_climatology.py --period future &gt;&amp;
+logs/01b_ensemble_climatology_future.log
+echo "future exit: $?"
+tail -5 logs/01b_ensemble_climatology_current.log
+echo "---"
+tail -5 logs/01b_ensemble_climatology_future.log" completed (exit code 0)
+
+● Stage 01b now completes cleanly for both periods. The stall is fixed — stages
+  01a and 01b are done. Stages 02 (interp/RH), 03 (delta/regrid), and 04 (apply
+  perturbation) haven't run yet.
+
+  Read 1 file (ctrl+o to expand)
+
+● Pipeline is unstuck: 01a and 01b are both complete and verified. Stages 02–04
+  haven't run yet — 02 and 03 are similarly light (50GB/2hr, same as what I just
+  ran), but 04 is heavier (8hr walltime, writes ~1GB ERA5 intermediate files to
+  a shared campaign directory) and is normally submitted via qsub 
+  jobs/04_apply_perturbation.pbs rather than run interactively.
+
+● User answered Claude's questions:
+  ⎿  · Want me to keep going with stages 02-04 now that 01a/01b are fixed? → Run
+     02 and 03 interactively now, submit 04 via qsub
+  Ran 1 shell command (ctrl+o to expand)
+
+● Stage 02 finished cleanly. Now stage 03.
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● Task Output btsxwnb5n
+  ⎿  03 exit: 0
+     wrote /glade/derecho/scratch/mingge/MPAS_LENS2_PGW_ENS10/03_delta/01.n
+     c
+     … +21 lines (ctrl+o to expand)
+
+● Background command "cd /glade/u/home/mingge/MPAS/MPAS_LENS2_PGW_ENS10
+source /glade/work/mingge/miniconda3/etc/profile.d/conda.sh
+conda activate casper_2023
+python 03_compute_delta_regrid.py &gt;&amp; logs/03_delta.log
+echo "03 exit: $?"
+tail -15 logs/03_delta.log" completed (exit code 0)
+
+● Stage 03 is done — all 12 monthly delta files written. Now submitting stage 04
+  as a PBS job, as agreed.
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● Job 5752592 submitted for stage 04 (currently configured for YEARS="1984" per
+  the PBS script — let me confirm that's what you want, and check it starts
+  cleanly).
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● Job 5752592 is running (started 18:18 on crhtc68).
+  ⎿  Error: `prompt` is required when `stop` is not true.
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● Stages 01a through 03 are complete, and stage 04 (YEARS="1984", job 5752592)
+  is running. I'll be notified automatically when it finishes — no need to poll
+  in the meantime.
+
+  Summary: The pipeline was stalled because 6 of the 1440 stage-01a climatology
+  files got HDF-corrupted (likely a transient filesystem race during the array
+  job). I deleted and rebuilt those 6 files, verified they open cleanly, then
+  reran 01b (ensemble mean), 02 (vertical interp), and 03 (delta/regrid) — all
+  completed successfully. Stage 04 (apply perturbation to ERA5 files) is now
+  running as PBS job 5752592.
+
+✻ Worked for 22m 34s
+
+● Background command "until ! qstat 5752592.casper-pbs &gt;/dev/null
+2&gt;&amp;1; do sleep 60; done
+echo "job 5752592 finished"
+tail -30
+/glade/u/home/mingge/MPAS/MPAS_LENS2_PGW_ENS10/logs/04_apply_perturbation.log"
+completed (exit code 0)
+
+  Searched for 1 pattern, ran 7 shell commands (ctrl+o to expand)
+
+● Stage 04 (job 5752592) finished successfully — exit status 0, ~2 minutes
+  walltime. It processed everything available for 1984: 6 main ERA5:*
+  intermediate files (only June 1984 exists in the source archive) plus 184
+  daily SST_UPDATE:* files, all written to
+  /glade/campaign/mmm/c3we/mingge/wpsv4.5_mpas_LENS2PGW_ens10mean/. No errors in
+  the log.
+
+  Full pipeline status: all stages complete.
+  - 01a/01b (climatology): fixed 6 corrupted files, rebuilt, verified
+  - 02 (vertical interp/RH): done
+  - 03 (delta/regrid): done, 12 monthly delta files written
+  - 04 (apply perturbation): done for YEARS="1984" as configured in
+  jobs/04_apply_perturbation.pbs
+
+  Note stage 04 is still scoped to just 1984 — if you want other years
+  perturbed, edit YEARS in that PBS script (or pass --years directly) and
+  resubmit.
+
+✻ Brewed for 1m 52s
+
+❯ write a verification code to check the updated PGW results make sense         
+
+  Listed 1 directory, ran 3 shell commands (ctrl+o to expand)
+
+● Good, I have everything I need. Now let's write the verification script
+  adapted for this ENS10 pipeline, auto-discovering whatever's actually been
+  perturbed rather than hardcoding June 1984.
+
+● Write(05_verify_perturbation.py)
+  ⎿  Wrote 421 lines to 05_verify_perturbation.py
+     #!/usr/bin/env python3
+     """
+     Stage 05: verify that stage 04's perturbed ERA5 WPS intermediate files
+     make
+     sense, both against the real ERA5 files they were built from and
+     against the
+     stage-03 delta they were supposed to apply. Auto-discovers whatever
+     has
+     actually been perturbed under config.PERTURBED_IM_DIR (no hardcoded
+     dates),
+     … +522 lines (ctrl+o to expand)
+
+● Now let's run it against the actual stage-04 output to confirm it works and
+  see what it reports.
+
+  Ran 1 shell command (ctrl+o to expand)
+● Task Output bgzo5lqps
+  ⎿  (No output)
+
+❯ can you make a notebook for 05_verify_perturbation.ipynb                      
+
+● Task Output bgzo5lqps
+  ⎿  main-stream test dates (6): ['1984-06-01_00', '1984-06-02_00', '1984-0
+     6-03_00', '1984-06-04_00', '1984-06-05_00', '1984-06-06_00']
+     SST-update test files (184)
+     … +33 lines (ctrl+o to expand)
+
+● Background command "cd /glade/u/home/mingge/MPAS/MPAS_LENS2_PGW_ENS10
+source /glade/work/mingge/miniconda3/etc/profile.d/conda.sh
+conda activate casper_2023
+python 05_verify_perturbation.py --years 1984" completed (exit code 0)
+
+  Made 1 scratchpad edit +534, ran 2 shell commands (ctrl+o to expand)
+
+● Now let's execute it end-to-end with jupyter nbconvert --execute to confirm
+  every cell actually runs clean before handing it over.
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● Task Output bd0tsa0qp
+  ⎿  (No output)
+
+● Task Output bd0tsa0qp
+  ⎿  [NbConvertApp] Converting notebook 05_verify_perturbation.ipynb to not
+     ebook
+     /glade/u/home/mingge/miniconda3/envs/casper_2023/lib/python3.11/site-p
+     … +11 lines (ctrl+o to expand)
+
+● Background command "cd /glade/u/home/mingge/MPAS/MPAS_LENS2_PGW_ENS10
+source /glade/work/mingge/miniconda3/etc/profile.d/conda.sh
+conda activate casper_2023
+jupyter nbconvert --to notebook --execute --inplace 05_verify_perturbation.ipynb
+2&gt;&amp;1 | tail -60" completed (exit code 0)
+
+● Executed cleanly, exit 0, all assertions passed, and it produced ~3.2MB of
+  embedded plot output. Let me pull the key text outputs from the executed
+  notebook to sanity-check the final results.
+
+  Ran 4 shell commands (ctrl+o to expand)
+
+● Both the script (05_verify_perturbation.py) and now the notebook
+  (05_verify_perturbation.ipynb) are done, executed end-to-end, and all checks
+  pass.
+
+  What they check (auto-discovering whatever's under config.PERTURBED_IM_DIR,
+  not hardcoded dates):
+  1. Structural integrity — only the documented fields (GHT/TT/RH/SKINTEMP/SST)
+  changed; everything else byte-identical to the original.
+  2. Quantitative correctness — perturbed - original matches the stage-03
+  ensemble-mean delta file exactly (float32 tolerance ~1e-5), for every
+  field/level/date.
+  3. Physical plausibility — RH stays in [0,100]; SST/SKINTEMP warm by a sane
+  amount; vertical profile shows tropospheric warming (+3.85 K mid-troposphere)
+  with relative upper-level cooling (−3.36 K lower-stratosphere) — the textbook
+  PGW signature.
+  4. SST-update stream (separate ERA5_SST:*→SST_UPDATE:* file layout) — same
+  checks, run across all 184 days of 1984 that were actually processed.
+
+  I did dig into one thing the notebook flags as a note rather than a failure: a
+  handful of ocean cells (~1.6% of cell/date combinations) show a >20 K applied
+  "delta." I traced the single worst case — it's at 74°S in August, where the
+  raw archived ERA5 "SST" value is 224 K (physically nonsensical for liquid
+  seawater — almost certainly a stale/proxy value under permanent Antarctic sea
+  ice). Stage 04's 271 K floor correctly clamps it, exactly as documented. So
+  this isn't a bug in the ensemble-mean pipeline — it's the safety floor doing
+  its job on already-bad input data. Nothing to fix.
+
+  Files added:
+  - 05_verify_perturbation.py — headless, exits 1 on any failure (good for
+  CI/rerunning after future --years batches)
+  - 05_verify_perturbation.ipynb — same checks plus inline maps/vertical-profile
+  plots for visual inspection
+
+✻ Cogitated for 23m 33s
+
+❯ In 05_verify_perturbation.ipynb  add clear comments to make it easy to        
+  understand                                                                    
+
+  Made 1 scratchpad edit +608, read 1 file (ctrl+o to expand)
+
+● Now regenerate the notebook and re-execute it to confirm the comments didn't
+  break anything.
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● Task Output bufal7n0z
+  ⎿  wrote /glade/u/home/mingge/MPAS/MPAS_LENS2_PGW_ENS10/05_verify_perturb
+     ation.ipynb
+     [NbConvertApp] Converting notebook 05_verify_perturbation.ipynb to not
+     … +12 lines (ctrl+o to expand)
+
+● Background command "cd /glade/u/home/mingge/MPAS/MPAS_LENS2_PGW_ENS10
+source /glade/work/mingge/miniconda3/etc/profile.d/conda.sh
+conda activate casper_2023
+python3 /glade/derecho/scratch/mingge/tmp/claude-2942/-glade-u-home-mingge-MPAS-
+MPAS-LENS2-PGW-ENS10/559ddcf8-1fb7-4c79-a024-9a3b9c0f591f/scratchpad/make_verify
+_notebook.py
+jupyter nbconvert --to notebook --execute --inplace 05_verify_perturbation.ipynb
+2&gt;&amp;1 | tail -40" completed (exit code 0)
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● Re-executed cleanly with zero errors across all 23 cells.
+  05_verify_perturbation.ipynb now has explanatory inline comments throughout
+  every code cell — covering why importlib is used to load
+  04_apply_perturbation.py, what each check is actually testing (structural
+  integrity, the RH-clip/SST-floor exceptions in the delta cross-check, the SST
+  land-fill vs. LANDSEA-mask distinction, the physical reasoning behind the
+  tropospheric-warming/stratospheric-cooling assertion), and a clearer
+  explanation of the SST-update outlier note (271 K floor correcting an
+  already-bad raw value, not a pipeline bug). All checks still pass.
+
+✻ Sautéed for 10m 35s
+
+❯ write another jupyter notebook with clear comments to compare the 1984        
+  results *_UPDATE:* with correspondent results from single member 2 of         
+  MPAS_LENS2_PGW                                                                
+  Made 1 scratchpad edit +345, listed 1 directory, ran 6 shell commands (ctrl+o to expand)
+
+● Now let's generate and execute it to verify everything runs and see actual
+  results.
+
+  Made 1 scratchpad edit +61 -46, read 1 file, ran 1 shell command (ctrl+o to expand)
+
+● Now update sections 3, 4, and 5 to use the ens10_deltas/mem2_deltas dicts
+  instead of the per-date reconstructed applied fields.
+
+  Made 2 scratchpad edits +59 -61 (ctrl+o to expand)
+
+● Now regenerate and re-execute.
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● Task Output bx77d5v2b
+  ⎿  wrote /glade/u/home/mingge/MPAS/MPAS_LENS2_PGW_ENS10/06_compare_ens10_
+     vs_member2_SST_update.ipynb
+     [NbConvertApp] Converting notebook 06_compare_ens10_vs_member2_SST_upd
+     … +12 lines (ctrl+o to expand)
+
+● Background command "cd /glade/u/home/mingge/MPAS/MPAS_LENS2_PGW_ENS10
+source /glade/work/mingge/miniconda3/etc/profile.d/conda.sh
+conda activate casper_2023
+python3 /glade/derecho/scratch/mingge/tmp/claude-2942/-glade-u-home-mingge-MPAS-
+MPAS-LENS2-PGW-ENS10/559ddcf8-1fb7-4c79-a024-9a3b9c0f591f/scratchpad/make_compar
+e_notebook.py
+jupyter nbconvert --to notebook --execute --inplace
+06_compare_ens10_vs_member2_SST_update.ipynb 2&gt;&amp;1 | tail -80" completed
+(exit code 0)
+
+● Executed cleanly this time. Let's pull the outputs to verify the results and
+  check for any errors.
+
+  Made 1 scratchpad edit +11 -8, read 1 file, ran 1 shell command (ctrl+o to expand)
+
+● Now let's finalize the summary section with the actual numbers we observed,
+  then regenerate and re-execute one last time.
+
+  Made 1 scratchpad edit +12 -5, ran 1 shell command (ctrl+o to expand)
+
+● Executed cleanly. Let's do a final error check to confirm the whole notebook
+  is clean.
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● Created and verified 06_compare_ens10_vs_member2_SST_update.ipynb in the ENS10
+  project directory, executed end-to-end with zero errors.
+
+  What it does: compares the 1984 SST_UPDATE:* perturbation results between this
+  project's 10-member LENS2 ensemble mean and the sibling MPAS_LENS2_PGW
+  single-member ("member 2" = 1031.002) pipeline, over the 184 common test dates
+  (June–December 1984). Both pipelines perturb the exact same real ERA5 source
+  archive — verified rather than assumed — so any difference found is
+  attributable purely to the delta.
+
+  Key findings baked into the executed notebook:
+  - Spatial pattern agreement is very high — ocean-cell correlation between the
+  two pipelines' delta maps is 0.99–0.995 every month.
+  - Magnitude is close but not identical — mem2 runs consistently ~0.07–0.10 K 
+  warmer than ens10 across all months (~2 K signal), a small but systematic warm
+  bias from that single member's own internal variability.
+  - RMS spatial difference (0.14–0.18 K) is small relative to the ~2 K mean
+  signal.
+  - ~10–12% of ocean-cell/date combinations hit the 271 K floor in both
+  pipelines — a real fraction (mostly Southern Ocean/Arctic water already near
+  freezing), not a rounding footnote, and it's consistent between the two
+  pipelines rather than being one-sided.
+
+  Along the way I caught and fixed a wrong assumption in an early draft: I'd
+  assumed the applied perturbation (perturbed − original) would be constant
+  across every day within a calendar month, but that's only true where the 271 K
+  floor doesn't kick in — floor-clamped cells depend on that day's own raw SST
+  value. Fixed by comparing the intended stage-03 delta fields directly (loaded
+  straight from each project's 03_delta/<month>.nc) rather than reconstructing
+  them from perturbed-minus-original, which also made the whole comparison
+  floor-independent and cleaner.
+
+✻ Worked for 13m 40s
+
+※ recap: You're building and verifying the LENS2-to-MPAS PGW ensemble pipeline; both the perturbation-verification notebook and the ensemble-vs-single-member comparison notebook now run cleanly with confirmed results. Next: decide if you want member-2 or ensemble-mean forcing for future MPAS runs. (disable recaps in /config)
+
+❯ add comparison of updated ERA5:1984* in                                       
+  /glade/campaign/mmm/c3we/mingge/wpsv4.5_mpas_LENS2PGW_ens10mean with those    
+  correspondent member2 ERA3:1984* in                                           
+  /glade/campaign/mmm/c3we/mingge/wpsv4.5_mpas_LENS2PGW_mem2                    
+  06_compare_ens10_vs_member2_SST_update.ipynb make it                          
+  06_compare_ens10_vs_member2_update.ipynb with nice and clear comment          
+
+  Made 1 scratchpad edit +609, searched for 1 pattern, read 1 file (ctrl+o to expand)
+
+● Now let's generate and execute the new notebook.
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● Task Output bh0oeki8i
+  ⎿  wrote /glade/u/home/mingge/MPAS/MPAS_LENS2_PGW_ENS10/06_compare_ens10_
+     vs_member2_update.ipynb
+
+● Task Output bh0oeki8i
+  ⎿  wrote /glade/u/home/mingge/MPAS/MPAS_LENS2_PGW_ENS10/06_compare_ens10_
+     vs_member2_update.ipynb
+     [NbConvertApp] Converting notebook 06_compare_ens10_vs_member2_update.
+     … +12 lines (ctrl+o to expand)
+● Background command "cd /glade/u/home/mingge/MPAS/MPAS_LENS2_PGW_ENS10
+source /glade/work/mingge/miniconda3/etc/profile.d/conda.sh
+conda activate casper_2023
+python3 /glade/derecho/scratch/mingge/tmp/claude-2942/-glade-u-home-mingge-MPAS-
+MPAS-LENS2-PGW-ENS10/559ddcf8-1fb7-4c79-a024-9a3b9c0f591f/scratchpad/make_compar
+e_notebook.py
+jupyter nbconvert --to notebook --execute --inplace
+06_compare_ens10_vs_member2_update.ipynb 2&gt;&amp;1 | tail -80" completed (exit
+code 0)
+
+● Executed cleanly. Let's pull the actual results to check correctness and fill
+  in the Part A summary with real numbers.
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● Good catch needed here — Part A uses area-weighted means while Part B
+  (inherited from the earlier notebook) uses plain unweighted means for the same
+  SST field, giving inconsistent numbers for comparable quantities. Let me fix
+  Part B to use the same area-weighted helper for consistency.
+
+  Made 1 scratchpad edit +16 -11, searched for 1 pattern (ctrl+o to expand)
+
+● Let me fix that broken line directly.
+
+  Made 1 scratchpad edit +3 -3 (ctrl+o to expand)
+
+● Now update B7's seasonal-cycle time series to also use area-weighted means for
+  consistency.
+
+  Made 1 scratchpad edit +4 -4 (ctrl+o to expand)
+
+● Now regenerate and re-execute to get consistent, corrected numbers.
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● Task Output bnadx2tvb
+  ⎿  wrote /glade/u/home/mingge/MPAS/MPAS_LENS2_PGW_ENS10/06_compare_ens10_
+     vs_member2_update.ipynb
+     [NbConvertApp] Converting notebook 06_compare_ens10_vs_member2_update.
+     … +12 lines (ctrl+o to expand)
+
+● Background command "cd /glade/u/home/mingge/MPAS/MPAS_LENS2_PGW_ENS10
+source /glade/work/mingge/miniconda3/etc/profile.d/conda.sh
+conda activate casper_2023
+python3 /glade/derecho/scratch/mingge/tmp/claude-2942/-glade-u-home-mingge-MPAS-
+MPAS-LENS2-PGW-ENS10/559ddcf8-1fb7-4c79-a024-9a3b9c0f591f/scratchpad/make_compar
+e_notebook.py
+jupyter nbconvert --to notebook --execute --inplace
+06_compare_ens10_vs_member2_update.ipynb 2&gt;&amp;1 | tail -60" completed (exit
+code 0)
+
+● Executed cleanly. Let's verify the corrected numbers now match between Part A
+  and Part B for June.
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● Task Output bg7wl186c
+  ⎿  (No output)
+
+● Task Output bg7wl186c
+  ⎿  (No output)
+
+  Ran 2 shell commands (ctrl+o to expand)
+
+● Background command "cd /glade/u/home/mingge/MPAS/MPAS_LENS2_PGW_ENS10
+python3 -c "
+import json
+nb = json.load(open('06_compare_ens10_vs_member2_update.ipynb'))
+errs = 0
+for i, cell in enumerate(nb['cells']):
+    if cell['cell_type'] != 'code':
+        continue
+    for out in cell.get('outputs', []):
+        if out.get('output_type') == 'error':
+            errs += 1
+            print(f'--- CELL {i} ERROR ---')
+            print('\n'.join(out.get('traceback', [])))
+        elif out.get('output_type') == 'execute_result':
+            data = out.get('data', {})
+            if 'text/plain' in data:
+                print(f'--- CELL {i} result ---')
+                print(''.join(data['text/plain']))
+print('total cells:', len(nb['cells']), 'error outputs:', errs)
+"" completed (exit code 0)
+
+● Now let's fill the summary with the actual verified numbers.
+
+  Made 2 scratchpad edits +20 -10 (ctrl+o to expand)
+
+● Now regenerate and do a final execution to lock in the corrected summary and
+  numbers.
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● Task Output behdjbpul
+  ⎿  wrote /glade/u/home/mingge/MPAS/MPAS_LENS2_PGW_ENS10/06_compare_ens10_
+     vs_member2_update.ipynb
+     [NbConvertApp] Converting notebook 06_compare_ens10_vs_member2_update.
+     … +12 lines (ctrl+o to expand)
+
+● Background command "cd /glade/u/home/mingge/MPAS/MPAS_LENS2_PGW_ENS10
+source /glade/work/mingge/miniconda3/etc/profile.d/conda.sh
+conda activate casper_2023
+python3 /glade/derecho/scratch/mingge/tmp/claude-2942/-glade-u-home-mingge-MPAS-
+MPAS-LENS2-PGW-ENS10/559ddcf8-1fb7-4c79-a024-9a3b9c0f591f/scratchpad/make_compar
+e_notebook.py
+jupyter nbconvert --to notebook --execute --inplace
+06_compare_ens10_vs_member2_update.ipynb 2&gt;&amp;1 | tail -40" completed (exit
+code 0)
+
+● Final clean execution confirmed. Now let's remove the old, superseded notebook
+  since this one replaces it.
+
+  Ran 2 shell commands (ctrl+o to expand)
+
+● Not tracked in git (whole directory is untracked), so removing it is safe and
+  reversible isn't a concern either way, but I'll just remove the superseded
+  file since the user asked to rename/consolidate it.
+
+  Ran 1 shell command (ctrl+o to expand)
+● 06_compare_ens10_vs_member2_update.ipynb is done — executed end-to-end with
+  zero errors across 37 cells, replacing the old
+  06_compare_ens10_vs_member2_SST_update.ipynb (removed).
+
+  What's new: it now has two parts, both fully commented:
+
+  - Part A — the main ERA5:1984-06-* archive (GHT, TT, RH at all 37 levels, plus
+  SKINTEMP/SST), covering the 6 June dates both pipelines have. Includes
+  structural checks, a per-field comparison table, a full vertical-profile plot,
+  and before/after/diff maps at 850 hPa.
+  - Part B — the periodic SST_UPDATE:* stream, same content as before, over 184
+  days (June–December).
+
+  Key results:
+
+  ┌───────────────────┬─────────┬─────────┬───────┬──────────┐
+  │ field (June 1984) │  ens10  │  mem2   │ corr  │ RMS diff │
+  ├───────────────────┼─────────┼─────────┼───────┼──────────┤
+  │ GHT @ 850 hPa     │ 22.14 m │ 22.65 m │ 0.93  │ 6.6 m    │
+  ├───────────────────┼─────────┼─────────┼───────┼──────────┤
+  │ TT @ 850 hPa      │ 3.72 K  │ 3.77 K  │ 0.96  │ 0.32 K   │
+  ├───────────────────┼─────────┼─────────┼───────┼──────────┤
+  │ RH @ 850 hPa      │ -2.43%  │ -2.36%  │ 0.93  │ 1.7%     │
+  ├───────────────────┼─────────┼─────────┼───────┼──────────┤
+  │ SKINTEMP          │ 3.22 K  │ 3.31 K  │ 0.99  │ 0.32 K   │
+  ├───────────────────┼─────────┼─────────┼───────┼──────────┤
+  │ SST (ocean)       │ 2.26 K  │ 2.34 K  │ 0.995 │ 0.15 K   │
+  └───────────────────┴─────────┴─────────┴───────┴──────────┘
+
+  Surface fields agree tightly (like the SST-update stream does over its full
+  184-day window); the 3-D fields at 850 hPa agree less tightly (0.93–0.96),
+  which makes sense — a single June's worth of geopotential/humidity climatology
+  carries more weather-scale spatial noise than 10-member averaging leaves
+  behind.
+
+  One thing I caught and fixed while building this: my first pass computed Part
+  A's SST mean with area (cos-latitude) weighting but Part B's SST mean with a
+  plain unweighted average — same field, two different numbers (2.26 K vs 1.93
+  K). I made both parts use the same area-weighted helper, which also changed
+  the Part B summary bullets slightly (now correctly ~2.26–2.30 K rather than
+  ~1.9–2.2 K); everything is now internally consistent.
+
+✻ Baked for 39m 9s
+
+※ recap: We've been building verification and comparison notebooks for your LENS2 PGW ensemble pipeline; the pipeline itself is fully run and verified. Just finished the ens10-vs-member2 comparison notebook covering both ERA5 streams — nothing pending, ready for your review. (disable recaps in /config)

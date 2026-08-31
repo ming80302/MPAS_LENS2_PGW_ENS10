@@ -1,0 +1,23 @@
+#!/bin/bash -l
+### Stage 03: future-minus-current delta, regridded (POP->CAM sparse
+### weights, then CAM->ERA5 bilinear) onto the real ERA5 grid.
+
+#PBS -N lens2pgw_ens10_03_delta
+#PBS -A P66770001
+#PBS -l select=1:ncpus=1:mem=50GB
+#PBS -l walltime=2:00:00
+#PBS -q casper
+#PBS -j oe
+#PBS -r y
+
+source /glade/work/mingge/miniconda3/etc/profile.d/conda.sh
+conda activate casper_2023   # needs scipy in addition to stage 01/02's deps
+
+cd /glade/u/home/mingge/MPAS/MPAS_LENS2_PGW_ENS10
+
+# ANNUAL=1 (set via run_pipeline.sh --annual / qsub -v ANNUAL=1) computes the
+# single annual-mean delta instead of the 12 per-month ones. See README.
+ANNUAL_FLAG=""
+[ "${ANNUAL:-0}" = "1" ] && ANNUAL_FLAG="--annual"
+
+python 03_compute_delta_regrid.py $ANNUAL_FLAG >& logs/03_delta${ANNUAL_FLAG:+_annual}.log
