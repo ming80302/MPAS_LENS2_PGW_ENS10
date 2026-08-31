@@ -1,5 +1,7 @@
 # LENS2 10-member-ensemble-mean -> ERA5 PGW perturbation pipeline
 
+[![GitHub](https://img.shields.io/badge/GitHub-ming80302%2FMPAS__LENS2__PGW__ENS10-blue?logo=github)](https://github.com/ming80302/MPAS_LENS2_PGW_ENS10)
+
 Computes a LENS2 (CESM2-LE) **10-member ensemble-mean** climate-change
 signal and adds it directly onto real ERA5 WPS intermediate-format files
 already used to drive MPAS -- the same classic delta/"pseudo-global-warming"
