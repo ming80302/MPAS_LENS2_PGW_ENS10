@@ -48,8 +48,8 @@ MEMBERS = [
 # Climatology periods (delta = future minus current)
 # ---------------------------------------------------------------------------
 PERIODS = {
-    "current": (1970, 1999),
-    "future": (2066, 2095),
+    "current": (2011, 2041),
+    "future":  (2070, 2100),
 }
 # Both periods fall entirely within one CESM2-LE experiment each (no
 # mid-period BHISTsmbb/BSSP370smbb split needed).
@@ -143,7 +143,8 @@ PERTURB_FIELDS_SFC = {"SST": "SST", "SKINTEMP": "TS"}  # IM field -> LENS2 var
 # ---------------------------------------------------------------------------
 # Output locations
 # ---------------------------------------------------------------------------
-SCRATCH_ROOT = Path("/glade/derecho/scratch/mingge/MPAS_LENS2_PGW_ENS10")
+#SCRATCH_ROOT = Path("/glade/derecho/scratch/mingge/MPAS_LENS2_PGW_ENS10")
+SCRATCH_ROOT = Path("/glade/campaign/mmm/c3we/mingge/MPAS_LENS2_PGW_ENS10")
 MEMBER_RAW_DIR = SCRATCH_ROOT / "01a_member_raw"  # per-member, per-variable monthly climatology
 RAW_DIR = SCRATCH_ROOT / "01b_ensemble_raw"       # 10-member equal-weight mean climatology
 INTERP_DIR = SCRATCH_ROOT / "02_interp"           # on ERA5 pressure levels + RH, per period/month

@@ -11,6 +11,10 @@ the surface -- abandoned rather than trusted).
 Usage:
     python 02_interp_pressure_rh.py --period current
     python 02_interp_pressure_rh.py --period future --months 6,7,8
+    python 02_interp_pressure_rh.py --period current --annual
+    python 02_interp_pressure_rh.py --period current --label JJASO
+        # reads RAW_DIR/current/{var}_JJASO.nc, e.g. built via
+        # `01b_ensemble_climatology.py --period current --months 6,7,8,9,10 --label JJASO`
 """
 
 from __future__ import annotations
@@ -25,10 +29,12 @@ import lib.vinterp as vinterp
 
 
 def _mkey(month) -> str:
-    """'ann' passes through for the annual-mean pseudo-month (config.py's
-    *_ann.nc convention, see 01b_ensemble_climatology.py's build_annual_mean);
-    a real calendar month is zero-padded as usual."""
-    return "ann" if month == "ann" else f"{int(month):02d}"
+    """Non-numeric pseudo-months pass through as-is -- 'ann' for the
+    annual-mean file (config.py's *_ann.nc convention, see
+    01b_ensemble_climatology.py's build_annual_mean), or a custom --label
+    like 'JJASO' for a seasonal-mean file (see 01b_ensemble_climatology.py's
+    build_mean). A real calendar month is zero-padded as usual."""
+    return month if isinstance(month, str) else f"{int(month):02d}"
 
 
 def _load(var: str, period: str, month) -> xr.DataArray:
@@ -76,17 +82,26 @@ def main():
     p = argparse.ArgumentParser()
     p.add_argument("--period", choices=list(config.PERIODS), required=True)
     p.add_argument("--months", default=None)
-    p.add_argument("--annual", action="store_true",
-                    help="interpolate the single annual-mean ensemble-mean "
-                         "climatology (RAW_DIR/period/{var}_ann.nc, from "
-                         "01b_ensemble_climatology.py --annual) instead of "
-                         "the 12 per-month climatologies")
+    group = p.add_mutually_exclusive_group()
+    group.add_argument("--annual", action="store_true",
+                        help="interpolate the single annual-mean ensemble-mean "
+                             "climatology (RAW_DIR/period/{var}_ann.nc, from "
+                             "01b_ensemble_climatology.py --annual) instead of "
+                             "the 12 per-month climatologies")
+    group.add_argument("--label", default=None,
+                        help="interpolate a single custom seasonal-mean ensemble "
+                             "climatology (RAW_DIR/period/{var}_<label>.nc, from "
+                             "01b_ensemble_climatology.py --label <label>) instead of "
+                             "the 12 per-month climatologies, e.g. --label JJASO "
+                             "for a Jun-Oct seasonal mean")
     p.add_argument("--overwrite", action="store_true")
     args = p.parse_args()
 
     config.ensure_dirs()
     if args.annual:
         months = ["ann"]
+    elif args.label:
+        months = [args.label]
     else:
         months = [int(m) for m in args.months.split(",")] if args.months else config.MONTHS
 

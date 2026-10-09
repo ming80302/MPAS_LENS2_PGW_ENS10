@@ -16,6 +16,10 @@ matching standard ensemble-mean practice and
 Usage:
     python 01b_ensemble_climatology.py --period current
     python 01b_ensemble_climatology.py --period future --vars T,Q,Z3
+    python 01b_ensemble_climatology.py --period current --annual
+    python 01b_ensemble_climatology.py --period current --months 6,7,8,9,10 --label JJASO
+        # builds the 5 monthly ensemble-mean climatologies (if not already
+        # present) then collapses them into {var}_JJASO.nc
 """
 
 from __future__ import annotations
@@ -77,50 +81,61 @@ def combine_variable(period_name: str, var: str, month: int, overwrite: bool = F
     print(f"wrote {out_file} (n_members={n_ok})")
 
 
-def build_annual_mean(period_name: str, variables: list, overwrite: bool = False) -> None:
-    """Annual-mean ensemble-mean climatology = unweighted mean of the 12
-    already-computed ensemble-mean monthly climatologies (RAW_DIR/period/
-    {var}_01.nc .. _12.nc), written as {var}_ann.nc in the same directory --
-    exactly analogous to MPAS_LENS2_PGW/01_climatology.py's
-    build_annual_mean, just fed this pipeline's ensemble-mean monthlies
-    instead of a single member's. Averaging commutes here (equal weight per
-    member and equal weight per month, both simple arithmetic means), so
-    mean-over-months-of(mean-over-members) equals mean-over-members-of
-    (mean-over-months) -- this function only needs to average combine_variable's
-    12 monthly outputs, not re-touch the 10 per-member climatologies."""
+def build_mean(period_name: str, months: list, label: str, variables: list,
+                overwrite: bool = False) -> None:
+    """Seasonal/annual-mean ensemble-mean climatology = unweighted mean of
+    the already-computed ensemble-mean monthly climatologies (RAW_DIR/period/
+    {var}_MM.nc for each month in `months`), written as {var}_<label>.nc in
+    the same directory -- exactly analogous to
+    MPAS_LENS2_PGW/01_climatology.py's build_annual_mean, just generalized to
+    an arbitrary month subset/label instead of always all 12 months under
+    '_ann'. Averaging
+    commutes here (equal weight per member and equal weight per month, both
+    simple arithmetic means), so mean-over-months-of(mean-over-members)
+    equals mean-over-members-of(mean-over-months) -- this function only
+    needs to average combine_variable's monthly outputs, not re-touch the 10
+    per-member climatologies."""
     out_dir = config.RAW_DIR / period_name
     out_dir.mkdir(parents=True, exist_ok=True)
 
     for var in variables:
-        out_file = out_dir / f"{var}_ann.nc"
+        out_file = out_dir / f"{var}_{label}.nc"
         if out_file.exists() and not overwrite:
             continue
 
-        month_files = [out_dir / f"{var}_{m:02d}.nc" for m in config.MONTHS]
+        month_files = [out_dir / f"{var}_{m:02d}.nc" for m in months]
         missing = [f.name for f in month_files if not f.exists()]
         if missing:
             raise FileNotFoundError(
-                f"{var} ({period_name}): annual mean needs all 12 ensemble-mean "
-                f"monthly climatologies first, missing {missing}")
+                f"{var} ({period_name}): {label} mean needs the ensemble-mean "
+                f"monthly climatologies for months {months} first, missing {missing}")
 
         das = []
         for f in month_files:
             with xr.open_dataset(f) as ds:
                 das.append(ds[var].load())
         stacked = np.stack([da.values for da in das], axis=0)
-        ann = das[0].copy(data=stacked.mean(axis=0).astype(das[0].dtype))
-        ann.attrs.pop("ens_mem", None)
-        ann.attrs.pop("var_id", None)
-        ann.attrs["n_months_averaged"] = len(das)
-        ann.attrs["n_members_averaged"] = das[0].attrs.get("n_members_averaged")
-        ann.attrs["period_start_year"], ann.attrs["period_end_year"] = config.PERIODS[period_name]
-        ann.attrs["climatology_mode"] = "annual_mean_of_12_ensemble_mean_monthly_climatologies"
-        ann.name = var
+        mean = das[0].copy(data=stacked.mean(axis=0).astype(das[0].dtype))
+        mean.attrs.pop("ens_mem", None)
+        mean.attrs.pop("var_id", None)
+        mean.attrs["n_months_averaged"] = len(das)
+        mean.attrs["months_averaged"] = ",".join(str(m) for m in months)
+        mean.attrs["n_members_averaged"] = das[0].attrs.get("n_members_averaged")
+        mean.attrs["period_start_year"], mean.attrs["period_end_year"] = config.PERIODS[period_name]
+        mean.attrs["climatology_mode"] = f"mean_of_ensemble_mean_monthly_climatologies_{label}"
+        mean.name = var
 
         tmp = out_file.with_suffix(".nc.tmp")
-        ann.to_dataset().to_netcdf(tmp)
+        mean.to_dataset().to_netcdf(tmp)
         tmp.rename(out_file)
-        print(f"wrote {out_file} (mean of 12 ensemble-mean monthly climatologies)")
+        print(f"wrote {out_file} (mean of {len(das)} ensemble-mean monthly climatologies)")
+
+
+def build_annual_mean(period_name: str, variables: list, overwrite: bool = False) -> None:
+    """Annual-mean ensemble-mean climatology -- build_mean specialized to
+    all 12 months, label 'ann' (kept as a thin wrapper for backward
+    compatibility with any existing callers)."""
+    build_mean(period_name, config.MONTHS, "ann", variables, overwrite=overwrite)
 
 
 def main():
@@ -129,16 +144,30 @@ def main():
     p.add_argument("--months", default=None)
     p.add_argument("--vars", default=None)
     p.add_argument("--overwrite", action="store_true")
-    p.add_argument("--annual", action="store_true",
-                    help="also build an annual-mean ensemble-mean climatology "
-                         "({var}_ann.nc) = unweighted mean of the 12 monthly "
-                         "ensemble-mean climatologies, for a non-seasonal "
-                         "(climate-mean) PGW delta. Builds the 12 monthly "
-                         "ensemble-mean climatologies first if not already "
-                         "present (ignores --months; requires 01a to have "
-                         "already produced all 10 members' monthly "
-                         "climatologies).")
+    group = p.add_mutually_exclusive_group()
+    group.add_argument("--annual", action="store_true",
+                        help="also build an annual-mean ensemble-mean climatology "
+                             "({var}_ann.nc) = unweighted mean of the 12 monthly "
+                             "ensemble-mean climatologies, for a non-seasonal "
+                             "(climate-mean) PGW delta. Builds the 12 monthly "
+                             "ensemble-mean climatologies first if not already "
+                             "present (ignores --months; requires 01a to have "
+                             "already produced all 10 members' monthly "
+                             "climatologies).")
+    group.add_argument("--label", default=None,
+                        help="also build a custom seasonal-mean ensemble-mean "
+                             "climatology ({var}_<label>.nc) = unweighted mean "
+                             "of the ensemble-mean monthly climatologies for "
+                             "the months given in --months (required together "
+                             "with --label), e.g. --months 6,7,8,9,10 --label "
+                             "JJASO for a Jun-Oct mean. Builds those monthly "
+                             "ensemble-mean climatologies first if not already "
+                             "present (requires 01a to have already produced "
+                             "all 10 members' climatologies for those months).")
     args = p.parse_args()
+
+    if args.label and not args.months:
+        p.error("--label requires --months")
 
     config.ensure_dirs()
     periods = list(config.PERIODS) if args.period == "all" else [args.period]
@@ -150,6 +179,12 @@ def main():
                 for month in config.MONTHS:
                     combine_variable(period_name, var, month, overwrite=args.overwrite)
             build_annual_mean(period_name, variables, overwrite=args.overwrite)
+        elif args.label:
+            months = [int(m) for m in args.months.split(",")]
+            for var in variables:
+                for month in months:
+                    combine_variable(period_name, var, month, overwrite=args.overwrite)
+            build_mean(period_name, months, args.label, variables, overwrite=args.overwrite)
         else:
             months = [int(m) for m in args.months.split(",")] if args.months else config.MONTHS
             for var in variables:

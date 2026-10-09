@@ -29,10 +29,11 @@ both pipelines) is identical code, just fed a different climatology.
 | Stage | Script | What it does |
 |---|---|---|
 | 01a | `01a_member_climatology.py` | Per-member LENS2 monthly climatology (current + future), one call per member in `config.MEMBERS` (10 total) -- otherwise identical to the single-member pipeline's stage 01. |
-| 01b | `01b_ensemble_climatology.py` | Averages the 10 members' climatologies together, **equal weight per member** (not pooled over all 300 member-years) -- one ensemble-mean climatology per (period, var, month), written in the exact layout the single-member pipeline's stage 01 produces, so stages 02-04 need zero changes. |
-| 02 | `02_interp_pressure_rh.py` | Unchanged from the single-member pipeline. |
-| 03 | `03_compute_delta_regrid.py` | Unchanged -- computes `future - current` from the two ensemble-mean climatologies (01b's output), i.e. **delta of ensemble-mean climatologies**, not a mean of 10 per-member deltas. Mathematically these are equal only for linear operations; regridding (stage 03) and pressure-level interpolation (stage 02) are *not* linear in general, so this pipeline's delta is not exactly the ensemble-mean of what you'd get running MPAS_LENS2_PGW's own stage 02/03 once per member -- it's the delta computed after averaging at the raw-climatology stage, chosen deliberately (see design discussion below) rather than as an approximation. |
-| 04 | `04_apply_perturbation.py` | Unchanged -- applies the 10-member-ensemble-mean delta to the real ERA5 IM files. |
+| 01b | `01b_ensemble_climatology.py` | Averages the 10 members' climatologies together, **equal weight per member** (not pooled over all 300 member-years) -- one ensemble-mean climatology per (period, var, month), written in the exact layout the single-member pipeline's stage 01 produces, so stages 02-04 need zero changes for the default per-month case. Also builds `--annual` (all 12 months) and `--label` (a custom month subset, e.g. Jun-Oct) seasonal means -- see "Seasonal-mean (--label) option" below. |
+| 02 | `02_interp_pressure_rh.py` | Same vertical-interpolation/RH logic as the single-member pipeline; gained a `--label` option (alongside the existing `--annual`) to interpolate a custom seasonal-mean climatology instead of the 12 per-month ones. |
+| 03 | `03_compute_delta_regrid.py` | Computes `future - current` from the two ensemble-mean climatologies (01b's output), i.e. **delta of ensemble-mean climatologies**, not a mean of 10 per-member deltas. Mathematically these are equal only for linear operations; regridding (stage 03) and pressure-level interpolation (stage 02) are *not* linear in general, so this pipeline's delta is not exactly the ensemble-mean of what you'd get running MPAS_LENS2_PGW's own stage 02/03 once per member -- it's the delta computed after averaging at the raw-climatology stage, chosen deliberately (see design discussion below) rather than as an approximation. Gained `--label`, plus `--period-current`/`--period-future` to compute a delta between *any* two `config.PERIODS` entries, not just the default `current`/`future` pair. |
+| 04 | `04_apply_perturbation.py` | Applies the ensemble-mean delta to the real ERA5 IM files. Gained `--label` and a `--delta-dir` override (to apply a delta computed with a non-default `--period-current`/`--period-future` pair). The SST-update stream (`ERA5_SST:*` -> `SST_UPDATE:*`) now only perturbs the record actually named `SST`/`SKINTEMP`, passing any other record in the same file (e.g. a `SEAICE` record present in some years' archives) through byte-identical -- earlier it perturbed every record in the file, which silently corrupted `SEAICE` wherever that extra record existed. |
+| 05 | `05_verify_perturbation.py` | New. Verifies a stage-04 run against the real ERA5 originals and the stage-03 delta: structural integrity (only the perturbed fields changed), quantitative correctness (applied delta matches stage-03 exactly, modulo the documented RH clip/SST floor), physical plausibility (expected warming/cooling signature), and a separate check for the periodic SST-update stream. Supports `--annual`/`--label`/`--delta-dir`, matching stage 04. Processes the main `ERA5:*` stream one date at a time rather than holding every date's full-resolution records in memory at once -- each file is ~1 GB, so this matters once you're checking more than a couple of dates on a memory-constrained login node. |
 
 ### Ensemble-mean method: average-of-climatologies, not average-of-deltas
 
@@ -143,21 +144,88 @@ python 04_apply_perturbation.py --annual          # writes to
   stream, byte-identical passthrough of unperturbed records) is unchanged
   from the default per-month run.
 
+## Seasonal-mean (`--label`) option
+
+Like `--annual` but for an arbitrary *subset* of calendar months instead of
+all 12 -- e.g. a Jun-Oct ("JJASO") mean rather than a full-year mean. Same
+idea as `--annual` (unweighted mean of the ensemble-mean monthly
+climatologies, equal weight per month), just parameterized by `--months`
+and a `--label` name for the output files instead of being hardcoded to
+all 12 months / `"ann"`.
+
+**Not wired into `./run_pipeline.sh`/PBS yet** -- `--annual` is, `--label`
+is not, so run the stages by hand:
+
+```
+for p in current future; do
+    python 01a_member_climatology.py --period $p --months 6,7,8,9,10   # unconditional
+    python 01b_ensemble_climatology.py --period $p --months 6,7,8,9,10 --label JJASO
+    python 02_interp_pressure_rh.py --period $p --label JJASO
+done
+python 03_compute_delta_regrid.py --label JJASO   # writes DELTA_DIR/JJASO.nc
+python 04_apply_perturbation.py --label JJASO     # writes to
+                                                   # config.PERTURBED_IM_DIR + "_JJASO"
+python 05_verify_perturbation.py --label JJASO    # verify before trusting the output
+```
+
+- **`--months` is required together with `--label`** (unlike `--annual`,
+  which always means all 12 months). `01b_ensemble_climatology.py --label`
+  builds whichever monthly ensemble-mean climatologies it needs first if
+  they're not already present (same auto-build behavior as `--annual`).
+- **Cross-period delta**: `03_compute_delta_regrid.py` also accepts
+  `--period-current`/`--period-future` to compute a delta between *any*
+  two `config.PERIODS` entries, not just the default `current`/`future`
+  pair (e.g. a 2011-2041-vs-current delta if you've added a third period
+  to `config.PERIODS`). The default pair writes to flat `DELTA_DIR/` as
+  before; any other pair writes to
+  `DELTA_DIR/<period-future>_minus_<period-current>/` instead, so it can
+  never collide with the default delta. To apply a delta from one of
+  those subdirectories, pass the same path to
+  `04_apply_perturbation.py --delta-dir ...` (and
+  `05_verify_perturbation.py --delta-dir ...` to verify it) -- the output
+  directory name gets the delta-dir's basename appended so it can't
+  collide with a default-period-pair `--label` run either.
+- **Separate output directories**, same reasoning as `--annual`: stage
+  04's `--label JJASO` output goes to
+  `config.PERTURBED_IM_DIR` + `"_JJASO"` (and further
+  `+ "_<delta-dir-basename>"` if `--delta-dir` was also given), never the
+  default or `--annual` directory.
+- Everything else (field matching, SST land-fill handling, the SST-update
+  stream, byte-identical passthrough of unperturbed records) is unchanged
+  from the default per-month run.
+
 ## Output locations
 
-- Per-member climatology: `config.MEMBER_RAW_DIR` (scratch, large-ish --
-  10x the single-member pipeline's raw-climatology size, safe to delete
-  once stage 01b has run).
+- Per-member climatology: `config.MEMBER_RAW_DIR` under `config.SCRATCH_ROOT`
+  (currently `/glade/campaign/mmm/c3we/mingge/MPAS_LENS2_PGW_ENS10`, not the
+  derecho scratch filesystem despite the variable name -- it's large-ish,
+  10x the single-member pipeline's raw-climatology size, and safe to
+  delete once stage 01b has run).
 - Ensemble-mean climatology: `config.RAW_DIR` (same layout as the
-  single-member pipeline's `RAW_DIR`).
+  single-member pipeline's `RAW_DIR`); `{var}_<label>.nc` alongside the
+  `{var}_01.nc .. _12.nc` / `{var}_ann.nc` files when `--label` is used.
+- Interpolated-onto-ERA5-levels climatology: `config.INTERP_DIR/<period>/<label>.nc`
+  for a `--label` run (alongside the per-month/`ann.nc` files).
+- Delta: `config.DELTA_DIR/<label>.nc` for the default `current`/`future`
+  period pair; `config.DELTA_DIR/<period-future>_minus_<period-current>/<label>.nc`
+  for any other `--period-current`/`--period-future` pair -- see
+  "Seasonal-mean (`--label`) option" above.
 - Perturbed ERA5 files:
   `/glade/campaign/mmm/c3we/mingge/wpsv4.5_mpas_LENS2PGW_ens10mean`
   (distinct from the single-member pipeline's
   `wpsv4.5_mpas_LENS2PGW_mem2`, so both can coexist and be compared).
   With `--annual`, this instead goes to
   `.../wpsv4.5_mpas_LENS2PGW_ens10mean_annualmean`
-  (`config.PERTURBED_IM_DIR_ANNUAL`) -- see "Annual-mean" above.
+  (`config.PERTURBED_IM_DIR_ANNUAL`) -- see "Annual-mean" above. With
+  `--label JJASO`, it goes to `..._ens10mean_JJASO` (further suffixed with
+  the delta-dir's basename if `--delta-dir` was also given) -- see
+  "Seasonal-mean (`--label`) option" above.
 
 Run via `./run_pipeline.sh` (PBS dependency chain, stage 01a as a 10-task
-job array) or stage-by-stage; every stage skips outputs that already exist
-unless `--overwrite` is passed.
+job array, supports `--annual`) or stage-by-stage (required for `--label`,
+which isn't wired into `run_pipeline.sh` yet); every stage skips outputs
+that already exist unless `--overwrite` is passed. After stage 04, run
+`05_verify_perturbation.py` (same `--annual`/`--label`/`--years` flags) to
+confirm the perturbed files are structurally sound, quantitatively match
+the stage-03 delta, and show a physically plausible signal before trusting
+them downstream.
